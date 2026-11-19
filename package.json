@@ -1,0 +1,33 @@
+{
+  "name": "triolima",
+  "version": "0.1.0",
+  "description": "Memory for AI agents that remembers by meaning, not age — three tiers over one git-native audit tree.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "scripts": {
+    "lint": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "clean": "rm -rf dist"
+  },
+  "keywords": ["ai", "agents", "memory", "context", "llm", "rag", "compaction"],
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "tsup": "^8.3.5",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2"
+  }
+}

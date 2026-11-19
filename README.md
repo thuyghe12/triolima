@@ -1,0 +1,119 @@
+# Triolima
+
+**Memory for AI agents that remembers by meaning, not age.**
+
+A standard context window forgets by age. When it fills, it drops the oldest
+messages — message #2, which held a contract rule or an incident ID, goes so
+that message #18 ("thanks, got it!") can stay. Triolima keeps what *matters*:
+hard facts pinned by pattern, finished tasks folded to a one-line receipt,
+filler pruned, and business signals extracted by rubric. Then it discloses only
+what this turn needs, so the prompt stays small no matter how long the
+conversation runs.
+
+> Three tiers over one git-native audit tree. Every fact Triolima keeps carries
+> the rubric, the confidence and the source turn that put it there — so you can
+> always answer *why does the agent remember this?*
+
+The name is the shape: **tri** tiers, in the Teolima lineage.
+
+## Why
+
+Two problems, one cause — treating every token as equally important and ordered
+only by time:
+
+- **Amnesia.** The fact you needed was evicted for being old, not for being
+  unimportant.
+- **Bloat.** 30–40% of a window is polite filler and retry loops, and cost grows
+  with every turn.
+
+Triolima scores relevance cheaply and continuously, and keeps the prompt bounded
+— target: under ~1k memory tokens per turn even after thousands of turns.
+
+## The three tiers
+
+```
+          a turn arrives
+               │
+   ┌───────────▼─────────────┐   Tier 1 — synchronous, deterministic, <2ms, $0
+   │ pin hard facts (regex)   │   never dropped, never summarised away
+   │ fold finished tasks      │   8 tool calls → one receipt the moment it ends
+   │ prune low-signal turns   │   a zero-LLM entropy score drops filler first
+   └───────────┬─────────────┘
+               │  (off the hot path, at a task boundary)
+   ┌───────────▼─────────────┐   Tier 2 — asynchronous rubric extraction
+   │ score against rubrics    │   business meaning, not just patterns
+   │ gate on a threshold      │   above it → a fact in verified state,
+   │                          │   tagged with rubric + confidence + source turn
+   └───────────┬─────────────┘
+               │
+   ┌───────────▼─────────────┐   Disclosure — inject just enough
+   │ L1 hot header (capped)   │   top facts by utility-weighted decay
+   │ L2 retrieval (per turn)  │   hybrid search, top-k, filtered
+   │ L3 deep archive (tools)  │   everything else, fetched only on demand
+   └──────────────────────────┘
+```
+
+Ranking in the hot header is explicit, not a black box:
+
+```
+score = (rubric_confidence × business_weight) × e^(−ln2 / half_life × turns_since_used)
+```
+
+Use a fact and its clock resets; leave it and it fades out of the header without
+being deleted.
+
+## The git-native audit tree
+
+Every memory operation — a pin, a fold, an extraction, a human answer — is a
+commit by an *actor* (`agent`, `pin`, `rubric`, `ranker`, `human`) on one
+content-addressed tree. The result is an audit DAG: `git log` tells you exactly
+what was remembered, when, by which worker, and why. Black-box summarisation
+can't give you that.
+
+## Human in the loop
+
+When a signal crosses its threshold, the loop pauses and raises one card —
+**keep going · pause · correct** — then resumes on your answer. Same scores the
+memory already computes, a thin hook on top: so the system that decides what to
+*remember* is the same one that decides when to *ask*.
+
+## Quickstart (target API)
+
+```ts
+import { createMemory, inMemory } from "triolima";
+
+const memory = createMemory({
+  pins:    [/INC-\d+/, /USD\s?[\d,]+/],
+  rubrics: [{ name: "root cause", cues: ["root cause", "traced to"], threshold: 0.8 }],
+  budget:  { hotFacts: 8, retrieveK: 4, halfLifeTurns: 6 },
+  store:   inMemory(),
+});
+
+memory.observe(turn);                       // Tier 1: synchronous
+await memory.consolidate();                 // Tier 2: async, at a task boundary
+const ctx = await memory.assemble(query);   // disclosure → a bounded prompt
+//   ctx.header · ctx.retrieved · ctx.tokens · ctx.trace   (full audit)
+```
+
+Wrapping an existing agent loop is a few lines.
+
+## Status
+
+Built in clean, verifiable steps. This is where it is:
+
+- [x] Scaffold, CI, docs and the first architecture decisions
+- [ ] Tier 1 — pins, task folding, entropy pruning
+- [ ] Tier 2 — rubric extractors and the threshold gate
+- [ ] Disclosure — hot ranker, hybrid retrieval, deep archive
+- [ ] Human-in-the-loop — threshold card, pause and resume
+- [ ] Benchmark — naive window vs Triolima, with numbers
+- [ ] Demo — a working app: chat, the live git tree, the layers
+
+## Docs
+
+- [Architecture](docs/ARCHITECTURE.md) — the pieces and how they fit.
+- [Decision records](docs/adr) — why the load-bearing choices were made.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
