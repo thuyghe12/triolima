@@ -73,9 +73,10 @@ export function findPins(text: string, pins: RegExp[]): PinHit[] {
   return hits;
 }
 
-/** A completed sub-task: a tool turn that reports done, or a clear close phrase. */
+/** A completed sub-task: a tool result reporting done, or a clear close phrase. */
 export function isTaskBoundary(turn: Turn): boolean {
   const status = turn.meta?.['status'];
+  if (turn.hop === 'tool_result' && typeof status === 'string' && /^(completed|done|success|ok)$/i.test(status)) return true;
   if (typeof status === 'string' && /^(completed|done|success|ok)$/i.test(status)) return true;
   return /\b(resolved|applied|mitigated|completed|deployed|done)\b/i.test(turn.content);
 }

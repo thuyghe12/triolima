@@ -14,11 +14,20 @@
  */
 export type Actor = 'agent' | 'fastpath' | 'rubric' | 'ranker' | 'human';
 
-/** One message in a conversation — the unit Tier 1 reads. */
+/**
+ * Which hop of the agent loop an event came from. When the host owns the loop
+ * (our demo over the Anthropic API), it instruments all four directly; an
+ * external-runtime adapter (Claude Code via hooks/OTLP) maps onto the same set.
+ */
+export type Hop = 'input' | 'tool_call' | 'tool_result' | 'output';
+
+/** One event in a conversation — the unit Tier 1 reads. Any hop, not just a chat turn. */
 export interface Turn {
   role: 'user' | 'assistant' | 'tool';
   content: string;
-  /** Optional structured result for a tool turn, e.g. { status: 'completed' }. */
+  /** Which hop this came from, when the host instruments at that granularity. */
+  hop?: Hop;
+  /** Optional structured result for a tool event, e.g. { status: 'completed' }. */
   meta?: Record<string, unknown>;
 }
 

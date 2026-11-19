@@ -49,3 +49,8 @@ test('runTier1 commits pins and records a prune', () => {
 test('SIGNAL_FLOOR is the documented default', () => {
   assert.equal(SIGNAL_FLOOR, 0.35);
 });
+
+test('a tool_result hop reporting completed is a task boundary', () => {
+  assert.ok(isTaskBoundary({ role: 'tool', hop: 'tool_result', content: 'ran', meta: { status: 'completed' } }));
+  assert.ok(!isTaskBoundary({ role: 'tool', hop: 'tool_call', content: 'calling', meta: {} }));
+});
