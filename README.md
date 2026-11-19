@@ -16,6 +16,22 @@ conversation runs.
 
 The name is the shape: **tri** tiers, in the Teolima lineage.
 
+## Proof
+
+One 120-turn incident conversation, critical facts planted at turn 1, replayed
+through three strategies and measured the same way — tokens sent per turn, and
+whether those facts are still recalled at the end (`npm run bench`):
+
+| strategy | avg tokens / turn | final tokens | critical recall |
+|---|---:|---:|---:|
+| naive — full history | 830 | 1,626 | 100% (but unbounded) |
+| naive — sliding window (12) | 156 | 155 | **0%** (amnesia) |
+| **Triolima** | **140** | **178** | **100%** |
+
+Triolima costs less per turn than even the sliding window, and recalls every
+fact the window has already dropped. The claim is asserted in CI, so the numbers
+cannot quietly rot.
+
 ## Why
 
 Two problems, one cause — treating every token as equally important and ordered
@@ -77,36 +93,49 @@ When a signal crosses its threshold, the loop pauses and raises one card —
 memory already computes, a thin hook on top: so the system that decides what to
 *remember* is the same one that decides when to *ask*.
 
-## Quickstart (target API)
+## Quickstart
+
+```bash
+npm install
+npm test          # the full suite, including the benchmark claim
+npm run bench     # print the comparison table above
+```
 
 ```ts
-import { createMemory, inMemory } from "triolima";
+import { createMemory } from "triolima";
 
 const memory = createMemory({
   pins:    [/INC-\d+/, /USD\s?[\d,]+/],
-  rubrics: [{ name: "root cause", cues: ["root cause", "traced to"], threshold: 0.8 }],
+  rubrics: [
+    { name: "root cause", cues: ["root cause", "traced to"], threshold: 0.8 },
+    { name: "security risk", cues: ["secret", "leaked", "exposed"], threshold: 0.75, alert: 0.75 },
+  ],
   budget:  { hotFacts: 8, retrieveK: 4, halfLifeTurns: 6 },
-  store:   inMemory(),
 });
 
-memory.observe(turn);                       // Tier 1: synchronous
-await memory.consolidate();                 // Tier 2: async, at a task boundary
-const ctx = await memory.assemble(query);   // disclosure → a bounded prompt
-//   ctx.header · ctx.retrieved · ctx.tokens · ctx.trace   (full audit)
+memory.observe(turn);                        // Tier 1: synchronous — pin, prune
+const { cards } = await memory.consolidate(); // Tier 2: extract; may raise a card
+const ctx = await memory.assemble(query);     // disclosure → a bounded prompt
+//   ctx.header · ctx.retrieved · ctx.tokens · ctx.trace
+
+if (cards.length) {                           // human in the loop, when it matters
+  const { text } = memory.answer(cards[0].print, "correct", "do X instead");
+}
 ```
 
-Wrapping an existing agent loop is a few lines.
+Wrapping an existing agent loop is a few lines. The whole audit trail is
+`memory.tree.log()` — every pin, fold, extraction and answer, by actor.
 
 ## Status
 
 Built in clean, verifiable steps. This is where it is:
 
 - [x] Scaffold, CI, docs and the first architecture decisions
-- [ ] Tier 1 — pins, task folding, entropy pruning
-- [ ] Tier 2 — rubric extractors and the threshold gate
-- [ ] Disclosure — hot ranker, hybrid retrieval, deep archive
-- [ ] Human-in-the-loop — threshold card, pause and resume
-- [ ] Benchmark — naive window vs Triolima, with numbers
+- [x] Tier 1 — pins, task folding, entropy pruning
+- [x] Tier 2 — rubric extractors and the threshold gate
+- [x] Disclosure — hot ranker, hybrid retrieval, deep archive
+- [x] Human-in-the-loop — threshold card, pause and resume
+- [x] Benchmark — naive window vs Triolima, with numbers
 - [ ] Demo — a working app: chat, the live git tree, the layers
 
 ## Docs
