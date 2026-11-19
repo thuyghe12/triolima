@@ -1,206 +1,197 @@
 // Triolima demo — the live view. Vanilla ES module, no build step.
-// It only renders what the server emits; all the logic is the real agent loop.
+// It renders only what the server emits; the logic is the real agent loop.
 
-const ACTORS = {
-  agent: 'var(--agent)',
-  fastpath: 'var(--fastpath)',
-  rubric: 'var(--rubric)',
-  ranker: 'var(--ranker)',
+const TIER = {
+  code: 'var(--code)',
+  decision: 'var(--decision)',
+  llm: 'var(--llm)',
   human: 'var(--human)',
+};
+const TIER_NOTE = {
+  code: 'deterministic — regex / threshold',
+  decision: 'scored decision — model-free gate',
+  llm: 'narrow LLM — subjective fallback',
+  human: 'human — critical, non-negotiable',
 };
 
 const $ = (id) => document.getElementById(id);
 const chat = $('chat');
-const tree = $('tree');
-let seenEvents = 0;
-let pendingCard = null;
+const traceEl = $('trace');
 
-// --- connection ------------------------------------------------------------
+let policy = [];
+const fired = new Map();
+let hopBody = null;
+
+// ───────────────────────── connection ─────────────────────────
 
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}`);
-
-  ws.addEventListener('open', () => setStatus(true, 'connected'));
-  ws.addEventListener('close', () => { setStatus(false, 'disconnected'); setTimeout(connect, 1500); });
-  ws.addEventListener('message', (ev) => handle(JSON.parse(ev.data)));
+  ws.addEventListener('open', () => setConn(true, 'connected'));
+  ws.addEventListener('close', () => { setConn(false, 'reconnecting'); setTimeout(connect, 1500); });
+  ws.addEventListener('message', (e) => handle(JSON.parse(e.data), ws));
 
   $('composer').addEventListener('submit', (e) => {
     e.preventDefault();
     const text = $('input').value.trim();
     if (!text) return;
-    bubble('user', text);
+    addTurn('user', text);
     ws.send(JSON.stringify({ type: 'say', text }));
     $('input').value = '';
   });
 
-  document.querySelectorAll('.card-actions button').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const answer = btn.dataset.answer;
-      if (answer === 'correct' && $('card-correct').hidden) {
-        $('card-correct').hidden = false; $('card-correct').focus(); return;
-      }
-      const text = $('card-correct').value.trim();
-      ws.send(JSON.stringify({ type: 'answer', answer, text: text || undefined }));
+  document.querySelectorAll('.card-actions button').forEach((b) =>
+    b.addEventListener('click', () => {
+      const answer = b.dataset.answer;
+      const correct = $('card-correct');
+      if (answer === 'correct' && correct.hidden) { correct.hidden = false; correct.focus(); return; }
+      ws.send(JSON.stringify({ type: 'answer', answer, text: correct.value.trim() || undefined }));
       closeCard();
-    });
-  });
-
+    }),
+  );
   return ws;
 }
 
-function setStatus(on, text) {
-  $('status').classList.toggle('on', on);
-  $('status-text').textContent = text;
+function setConn(on, text) {
+  $('conn').classList.toggle('live', on);
+  $('conn-text').textContent = text;
 }
-
-// --- event handling --------------------------------------------------------
 
 function handle(e) {
   switch (e.kind) {
-    case 'ready':
-      renderLegend();
-      renderSuggest();
-      setStatus(true, e.model ? `live · ${e.model}` : 'no key');
-      break;
-    case 'assistant': bubble('assistant', e.text); break;
-    case 'tool_call': toolLine(`→ ${e.name}`, JSON.stringify(e.input)); break;
-    case 'tool_result': toolLine(`← ${e.name}`, e.output); break;
-    case 'memory': renderMemory(e.snapshot); break;
+    case 'ready': renderLegend(); renderChips(); if (e.model) setConn(true, e.model); break;
+    case 'policy': policy = e.items; renderRubric(); break;
+    case 'hop': addHop(e.hop, e.at); break;
+    case 'assistant': addTurn('agent', e.text); break;
+    case 'tool_call': addTool('→', e.name, JSON.stringify(e.input), false); break;
+    case 'tool_result': addTool('←', e.name, e.output, true); break;
+    case 'trace': addRow(e.row); break;
+    case 'stat': renderStat(e); break;
     case 'card': openCard(e.card); break;
-    case 'notice': bubble('note', e.text); break;
-    case 'error': bubble('err', e.message); break;
+    case 'notice': addMeta('note', e.text); break;
+    case 'error': addMeta('err', e.message); break;
     case 'done': break;
   }
 }
 
-// --- chat ------------------------------------------------------------------
+// ───────────────────────── chat ─────────────────────────
 
-function bubble(cls, text) {
+function addTurn(who, text) {
   const el = document.createElement('div');
-  el.className = `msg ${cls}`;
-  el.textContent = text;
-  chat.appendChild(el);
-  chat.scrollTop = chat.scrollHeight;
+  el.className = `turn ${who}`;
+  if (who === 'agent') { const w = document.createElement('p'); w.className = 'who'; w.textContent = 'agent'; el.appendChild(w); }
+  const b = document.createElement('div'); b.className = 'body'; b.textContent = text; el.appendChild(b);
+  chat.appendChild(el); scrollChat();
 }
-function toolLine(head, detail) {
+function addTool(arrow, name, payload, isRes) {
   const el = document.createElement('div');
-  el.className = 'msg tool';
-  const b = document.createElement('b');
-  b.textContent = head;
-  el.appendChild(b);
-  el.appendChild(document.createTextNode('  ' + (detail.length > 160 ? detail.slice(0, 160) + '…' : detail)));
-  chat.appendChild(el);
-  chat.scrollTop = chat.scrollHeight;
+  el.className = `tool${isRes ? ' res' : ''}`;
+  el.innerHTML = `<span class="arrow">${arrow}</span><b>${esc(name)}</b><span class="payload">${esc(payload)}</span>`;
+  chat.appendChild(el); scrollChat();
 }
+function addMeta(cls, text) {
+  const el = document.createElement('div'); el.className = cls; el.textContent = text;
+  chat.appendChild(el); scrollChat();
+}
+function scrollChat() { chat.scrollTop = chat.scrollHeight; }
 
-// --- audit tree ------------------------------------------------------------
+// ───────────────────────── trace ─────────────────────────
 
 function renderLegend() {
-  $('legend').innerHTML = Object.entries(ACTORS)
-    .map(([a, c]) => `<span><i style="background:${c}"></i>${a}</span>`)
-    .join('');
+  $('legend').innerHTML = Object.entries(TIER)
+    .map(([t, c]) => `<span><i style="background:${c}"></i>${t}</span>`).join('');
 }
 
-function renderTree(events) {
-  // Append only the new ones so the animation reads as a growing log.
-  for (let i = seenEvents; i < events.length; i++) {
-    const e = events[i];
-    const color = ACTORS[e.actor] ?? 'var(--muted)';
-    const row = document.createElement('div');
-    row.className = 'evt fresh';
-    row.innerHTML =
-      `<div class="rail"><div class="node" style="background:${color}"></div></div>` +
-      `<div class="body"><div class="head"><span class="op" style="color:${color}">${e.actor}·${e.op}</span> <span class="at">t${e.at} ${e.id}</span></div>` +
-      `<div class="sum">${escape(e.summary)}</div></div>`;
-    tree.appendChild(row);
-  }
-  seenEvents = events.length;
-  tree.scrollTop = tree.scrollHeight;
+function addHop(hop, at) {
+  $('trace-empty').style.display = 'none';
+  const g = document.createElement('div'); g.className = 'hopgroup';
+  g.innerHTML = `<div class="hophead">${esc(hop)} · t${at}</div>`;
+  const body = document.createElement('div'); body.className = 'hopbody';
+  g.appendChild(body); traceEl.appendChild(g); hopBody = body;
+  $('panel-trace').scrollTop = $('panel-trace').scrollHeight;
 }
 
-// --- memory ----------------------------------------------------------------
+function addRow(row) {
+  $('trace-empty').style.display = 'none';
+  if (!hopBody) addHop(row.hop, row.at);
+  const el = document.createElement('div');
+  el.className = 'row fresh';
+  el.innerHTML =
+    `<span class="dot" style="background:${TIER[row.tier]}"></span>` +
+    `<span class="item">${esc(row.item)}</span>` +
+    `<span class="verdict">${esc(row.verdict)}</span>`;
+  hopBody.appendChild(el);
+  $('panel-trace').scrollTop = $('panel-trace').scrollHeight;
 
-function renderMemory(s) {
-  renderTree(s.events);
-
-  // meter
-  const max = Math.max(s.naiveTokens, s.memoryTokens, 1);
-  $('naive-tok').textContent = s.naiveTokens.toLocaleString();
-  $('mem-tok').textContent = s.memoryTokens.toLocaleString();
-  $('naive-bar').style.width = `${(s.naiveTokens / max) * 100}%`;
-  $('mem-bar').style.width = `${(s.memoryTokens / max) * 100}%`;
-  if (s.naiveTokens > s.memoryTokens && s.memoryTokens > 0) {
-    const x = (s.naiveTokens / s.memoryTokens).toFixed(1);
-    $('meter-note').textContent = `${x}× smaller prompt — and nothing important dropped.`;
-  } else {
-    $('meter-note').textContent = '';
-  }
-
-  // L1 pins
-  const pins = s.facts.filter((f) => f.kind === 'pin');
-  $('pins').innerHTML = pins.length
-    ? pins.map((f) => `<span class="chip">${escape(f.text)}</span>`).join('')
-    : '<span class="archive">none yet</span>';
-
-  // L2 verified, with a decay bar from the header score
-  const headerScore = new Map(s.header.map((h) => [h.id, h.score]));
-  const verified = s.facts.filter((f) => f.kind === 'verified');
-  const maxScore = Math.max(0.01, ...verified.map((f) => headerScore.get(f.id) ?? (f.confidence ?? 0) * f.weight));
-  $('verified').innerHTML = verified.length
-    ? verified.map((f) => {
-        const inHeader = headerScore.has(f.id);
-        const score = headerScore.get(f.id) ?? (f.confidence ?? 0) * f.weight;
-        const pct = Math.max(6, Math.min(100, (score / maxScore) * 100));
-        return `<div class="fact">
-          <div class="ft">${escape(f.text)}</div>
-          <div class="fmeta">
-            <span><span class="tag">${escape(f.rubric ?? 'signal')}</span> · ${(f.confidence ?? 0).toFixed(2)} · ${inHeader ? 'in header' : 'faded'}</span>
-            <span class="decay"><i style="width:${pct}%"></i></span>
-          </div>
-        </div>`;
-      }).join('')
-    : '<span class="archive">none yet — ask the agent to diagnose</span>';
-
-  // L3 archive
-  $('archive').textContent = `${s.archiveSize} fact${s.archiveSize === 1 ? '' : 's'} held; only the header + retrieved reach the model.`;
+  fired.set(row.item, (fired.get(row.item) ?? 0) + 1);
+  const badge = document.querySelector(`.fired[data-item="${cssEsc(row.item)}"]`);
+  if (badge) badge.textContent = `×${fired.get(row.item)}`;
 }
 
-// --- HITL card -------------------------------------------------------------
+// ───────────────────────── rubric (ownership) ─────────────────────────
+
+function renderRubric() {
+  $('rubric').innerHTML = policy.map((p) => `
+    <div class="item-card" style="--tier:${TIER[p.tier]}" data-id="${cssEsc(p.id)}">
+      <div class="item-head">
+        <span class="nm">${esc(p.name)}</span>
+        <span class="tag">${esc(p.tier)}</span>
+        <span class="fired" data-item="${cssEsc(p.name)}">${fired.get(p.name) ? '×' + fired.get(p.name) : ''}</span>
+      </div>
+      <div class="item-what">${esc(p.what)}</div>
+      <dl class="item-more">
+        <dt>how</dt><dd>${esc(p.how)}</dd>
+        <dt>why this tier</dt><dd>${esc(p.why)}</dd>
+      </dl>
+    </div>`).join('');
+  document.querySelectorAll('.item-head').forEach((h) =>
+    h.addEventListener('click', () => h.parentElement.classList.toggle('open')));
+}
+
+// ───────────────────────── stat footer ─────────────────────────
+
+function renderStat(s) {
+  const naive = s.naiveTokens.toLocaleString();
+  const mem = s.memoryTokens.toLocaleString();
+  const win = s.memoryTokens > 0 && s.naiveTokens > s.memoryTokens
+    ? `<span class="win">${(s.naiveTokens / s.memoryTokens).toFixed(1)}× leaner</span>` : '';
+  $('stat').innerHTML = `prompt <b>${mem}</b> tok · naive <b>${naive}</b> tok${win}`;
+}
+
+// ───────────────────────── HITL card ─────────────────────────
 
 function openCard(card) {
-  pendingCard = card;
-  $('card-tag').textContent = card.rubric;
   $('card-says').textContent = card.says;
-  $('card-meta').textContent = `confidence ${card.confidence.toFixed(2)} ≥ alert ${card.alert.toFixed(2)} · turn ${card.sourceTurn}`;
-  $('card-correct').value = '';
-  $('card-correct').hidden = true;
+  $('card-meta').textContent = `${card.rubric} · confidence ${card.confidence.toFixed(2)} ≥ alert ${card.alert.toFixed(2)} · turn ${card.sourceTurn}`;
+  const c = $('card-correct'); c.value = ''; c.hidden = true;
   $('overlay').hidden = false;
 }
-function closeCard() {
-  $('overlay').hidden = true;
-  pendingCard = null;
-}
+function closeCard() { $('overlay').hidden = true; }
 
-// --- suggestions -----------------------------------------------------------
+// ───────────────────────── chrome: tabs, collapse, chips ─────────────────────────
 
-function renderSuggest() {
-  const prompts = [
-    'Investigate INC-7788 on payments-api.',
-    'What do the metrics say?',
-    'Apply the fix.',
-  ];
-  $('suggest').innerHTML = '';
+$('tabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('button'); if (!btn) return;
+  document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b === btn));
+  const trace = btn.dataset.tab === 'trace';
+  $('panel-trace').hidden = !trace;
+  $('panel-rubric').hidden = trace;
+});
+$('hide').addEventListener('click', () => $('app').classList.add('collapsed'));
+$('reopen').addEventListener('click', () => $('app').classList.remove('collapsed'));
+
+function renderChips() {
+  const prompts = ['Investigate INC-7788 on payments-api.', 'What do the metrics say?', 'Apply the fix.'];
+  $('chips').innerHTML = '';
   prompts.forEach((p) => {
     const b = document.createElement('button');
     b.textContent = p;
     b.addEventListener('click', () => { $('input').value = p; $('input').focus(); });
-    $('suggest').appendChild(b);
+    $('chips').appendChild(b);
   });
 }
 
-function escape(s) {
-  return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-}
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function cssEsc(s) { return String(s).replace(/["\\]/g, '\\$&'); }
 
 connect();

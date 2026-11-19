@@ -55,11 +55,16 @@ whole history of a conversation's memory is one inspectable DAG.
 ## The demo
 
 `demo/` is a working proof, not a mock: a real Claude agent works an SRE incident
-while the browser shows the chat, the audit tree coloured by actor, the three
-layers and a live token meter. `demo/agent/loop.ts` is the whole integration —
-`observe` at each hop, `assemble` to build the prompt, `consolidate` to extract and
-raise the human-in-the-loop card. The model is behind a one-method `ModelProvider`,
-so the loop is tested in CI with a scripted model and runs for real with a key.
+in a dual panel — chat on the left, and on the right a **live trace of every hop,
+classified by the mechanism that handled it** (code · decision · narrow-LLM ·
+human), plus a Rubric tab where that policy is owned and inspected. The tiering is
+the thesis made visible: each signal is routed to the cheapest mechanism that can
+be trusted with it, escalating to a human only for the critical, non-negotiable
+ones. `demo/agent/loop.ts` is the whole integration — `observe` at each hop,
+`assemble` to build the prompt, `consolidate` to extract and raise the card — and
+it maps each operation to its tier for the trace. The model sits behind a one-method
+`ModelProvider` (and a narrow-LLM `judge`), so the loop is tested in CI with a
+scripted model and runs for real with a key.
 
 ## What proves it
 

@@ -1,59 +1,54 @@
 /**
- * The agent loop — where Triolima meets a real model.
+ * The agent loop — where Triolima meets a real model, and where every hop is
+ * classified by the mechanism that handled it.
  *
- * We own the loop, so we instrument it directly: every hop (input, tool_call,
- * tool_result, output) is `observe`d into memory, Tier 2 runs at each, and the
- * prompt the model sees is NOT the full transcript — it is whatever `assemble`
- * discloses. That is the whole demonstration: the agent stays sharp across a
- * long incident because memory, not history, feeds it, and the token meter shows
- * the gap. A mitigation that memory flags as irreversible pauses for a human.
- *
- * The loop is transport-agnostic: it emits events and awaits `askHuman`. The
- * server wires those to a WebSocket; tests wire them to arrays and auto-answers.
+ * We own the loop, so we instrument it directly: each hop (input, tool_call,
+ * tool_result, output) is `observe`d, Tier 2 runs, and the prompt the model sees
+ * is whatever `assemble` discloses — not the transcript. As operations land on
+ * the audit tree, the loop maps each to its tier (code · decision · llm · human)
+ * and emits a trace row, so the right panel shows, live, which mechanism made
+ * each call and when. The one subjective call (blast radius) escalates to a
+ * narrow LLM via an injected `judge`; everything else is deterministic code, a
+ * scored decision, or a human card.
  */
 import {
-  createMemory, estimateTokens, rankHot, hybridRetrieve,
-  type Memory, type Card, type Answer,
+  createMemory, estimateTokens,
+  type Memory, type Card, type Answer, type MemoryEvent,
 } from '../../src/index';
 import type { ModelProvider, ApiMessage, ToolCall } from './provider';
-import { MEMORY_CONFIG, SYSTEM } from './config';
+import { MEMORY_CONFIG, SYSTEM, TIER_BY_ITEM, type Tier } from './config';
 import { TOOL_SPECS, MUTATING, executeTool } from './tools';
 
-export interface EventRow { actor: string; op: string; summary: string; at: number; id: string }
-export interface FactRow {
-  id: string; kind: 'pin' | 'verified'; text: string;
-  rubric?: string | undefined; confidence?: number | undefined;
-  weight: number; lastUsed: number; uses: number; sourceTurn: number;
-}
-export interface MemorySnapshot {
-  turn: number;
-  events: EventRow[];
-  facts: FactRow[];
-  header: { id: string; kind: string; text: string; score: number | null }[];
-  retrieved: { id: string; text: string; relevance: number }[];
-  archiveSize: number;
-  memoryTokens: number;
-  /** What a naive full-history prompt would cost by now — the baseline. */
-  naiveTokens: number;
+export interface TraceRow {
+  at: number;
+  hop: string;
+  tier: Tier;
+  item: string;
+  verdict: string;
 }
 
 export type LoopEvent =
+  | { kind: 'hop'; hop: string; at: number }
   | { kind: 'assistant'; text: string }
   | { kind: 'tool_call'; name: string; input: Record<string, unknown> }
   | { kind: 'tool_result'; name: string; output: string }
-  | { kind: 'memory'; snapshot: MemorySnapshot }
+  | { kind: 'trace'; row: TraceRow }
+  | { kind: 'stat'; turn: number; memoryTokens: number; naiveTokens: number }
   | { kind: 'card'; card: Card }
   | { kind: 'notice'; text: string }
   | { kind: 'done'; usage: { input: number; output: number } }
   | { kind: 'error'; message: string };
 
 export type AskHuman = (card: Card) => Promise<{ answer: Answer; text?: string }>;
+/** The narrow-LLM tier: a subjective judgment, injected so tests stay deterministic. */
+export type Judge = (text: string) => Promise<{ verdict: string; confidence: number } | null>;
 
 export interface SessionDeps {
   provider: ModelProvider;
   emit: (e: LoopEvent) => void;
   askHuman: AskHuman;
-  /** Cost cap: model calls per user message. */
+  judge?: Judge;
+  judgeCues?: string[];
   maxModelCalls?: number;
 }
 
@@ -62,45 +57,70 @@ export interface Session {
   say: (userText: string) => Promise<void>;
 }
 
-const SCAFFOLD_TOKENS = 40;
+const num = (v: unknown): string => (typeof v === 'number' ? v.toFixed(2) : String(v ?? ''));
 
-function toolResultBlock(id: string, content: string): unknown {
-  return { type: 'tool_result', tool_use_id: id, content };
+/** Map an audit-tree commit to its mechanism tier and a one-line verdict. */
+function classify(e: MemoryEvent): { item: string; tier: Tier; verdict: string } | null {
+  switch (e.op) {
+    case 'pin': return { item: 'Hard facts', tier: 'code', verdict: `pinned ${String(e.data['value'] ?? '')}`.trim() };
+    case 'prune': return { item: 'Filler pruning', tier: 'code', verdict: 'pruned low-signal turn' };
+    case 'fold': return { item: 'Task folding', tier: 'code', verdict: `folded ${String(e.data['steps'] ?? '')} steps`.trim() };
+    case 'extract': {
+      const r = String(e.data['rubric'] ?? '');
+      return { item: r, tier: TIER_BY_ITEM[r] ?? 'decision', verdict: `extracted · ${num(e.data['confidence'])}` };
+    }
+    case 'hold': {
+      const r = String(e.data['rubric'] ?? '');
+      return { item: r, tier: TIER_BY_ITEM[r] ?? 'decision', verdict: `held · ${num(e.data['confidence'])} < ${num(e.data['threshold'])}` };
+    }
+    case 'alert': return { item: 'Irreversible action', tier: 'human', verdict: 'routed to a human' };
+    case 'answer': return { item: 'Irreversible action', tier: 'human', verdict: `human · ${String(e.data['answer'] ?? '')}` };
+    default: return null; // 'turn', 'assemble' — not a classified decision
+  }
 }
 
 export function createSession(deps: SessionDeps): Session {
   const memory = createMemory(MEMORY_CONFIG);
   const maxCalls = deps.maxModelCalls ?? 8;
-  let naiveTokens = 0; // grows with every hop — the full-history baseline
+  const judgeCues = deps.judgeCues ?? [];
+  let naiveTokens = 0;
+  let tracedUpTo = 0;
+  let judgedThisTurn = false;
 
-  // A read-only view of memory for the UI: never commits or touches, so emitting
-  // it freely does not pollute the audit tree (the real assemble does that once
-  // per model call).
-  function snapshot(query: string): MemorySnapshot {
-    const all = memory.store.all();
-    const header = rankHot(all, MEMORY_CONFIG.budget, memory.turn());
-    const inHeader = new Set(header.map((f) => f.id));
-    const retrieved = hybridRetrieve(query, all.filter((f) => !inHeader.has(f.id)), MEMORY_CONFIG.budget.retrieveK);
-    const memoryTokens =
-      header.reduce((t, f) => t + estimateTokens(f.text), 0) +
-      retrieved.reduce((t, f) => t + estimateTokens(f.text), 0) + SCAFFOLD_TOKENS;
-    return {
-      turn: memory.turn(),
-      events: memory.tree.log().map((e) => ({ id: e.id.slice(0, 8), actor: e.actor, op: e.op, summary: e.summary, at: e.at })),
-      facts: all.map((f) => ({
-        id: f.id.slice(0, 8), kind: f.kind, text: f.text, rubric: f.rubric, confidence: f.confidence,
-        weight: f.weight, lastUsed: f.lastUsed, uses: f.uses, sourceTurn: f.sourceTurn,
-      })),
-      header: header.map((f) => ({ id: f.id.slice(0, 8), kind: f.kind, text: f.text, score: Number.isFinite(f.score) ? f.score : null })),
-      retrieved: retrieved.map((f) => ({ id: f.id.slice(0, 8), text: f.text, relevance: f.relevance })),
-      archiveSize: all.length,
-      memoryTokens,
-      naiveTokens,
-    };
+  function flushTrace(hop: string): void {
+    const log = memory.tree.log();
+    for (let i = tracedUpTo; i < log.length; i++) {
+      const e = log[i]!;
+      const c = classify(e);
+      if (c) deps.emit({ kind: 'trace', row: { at: e.at, hop, tier: c.tier, item: c.item, verdict: c.verdict } });
+    }
+    tracedUpTo = log.length;
+  }
+
+  async function observeHop(role: 'user' | 'assistant' | 'tool', content: string, hop: string, meta?: Record<string, unknown>): Promise<void> {
+    naiveTokens += estimateTokens(content);
+    deps.emit({ kind: 'hop', hop, at: memory.turn() + 1 });
+    memory.observe({ role, content, hop: hop as 'input' | 'tool_call' | 'tool_result' | 'output', ...(meta ? { meta } : {}) });
+    await memory.consolidate();
+    flushTrace(hop);
+
+    // The narrow-LLM tier: a subjective severity call, only on an output hop that
+    // looks severity-relevant, at most once per message, and never fatal.
+    if (deps.judge && role === 'assistant' && !judgedThisTurn && judgeCues.some((c) => content.toLowerCase().includes(c))) {
+      judgedThisTurn = true;
+      try {
+        const v = await deps.judge(content);
+        if (v) deps.emit({ kind: 'trace', row: { at: memory.turn(), hop, tier: 'llm', item: 'Blast radius', verdict: `${v.verdict} · ${v.confidence.toFixed(2)}` } });
+      } catch {
+        deps.emit({ kind: 'trace', row: { at: memory.turn(), hop, tier: 'llm', item: 'Blast radius', verdict: 'judge unavailable — kept cheaper tiers' } });
+      }
+    }
   }
 
   async function assembleForPrompt(query: string): Promise<string> {
     const a = await memory.assemble(query);
+    tracedUpTo = memory.tree.log().length; // the ranker commit is not a classified decision
+    deps.emit({ kind: 'stat', turn: memory.turn(), memoryTokens: a.tokens, naiveTokens });
     const pins = a.header.filter((f) => f.kind === 'pin').map((f) => `- ${f.text}`);
     const verified = a.header.filter((f) => f.kind === 'verified').map((f) => `- [${f.rubric} ${(f.confidence ?? 1).toFixed(2)}] ${f.text}`);
     const retrieved = a.retrieved.map((f) => `- ${f.text}`);
@@ -113,16 +133,10 @@ export function createSession(deps: SessionDeps): Session {
     ].filter(Boolean).join('\n\n');
   }
 
-  async function observeHop(role: 'user' | 'assistant' | 'tool', content: string, hop: 'input' | 'tool_call' | 'tool_result' | 'output', meta?: Record<string, unknown>): Promise<void> {
-    naiveTokens += estimateTokens(content);
-    memory.observe({ role, content, hop, ...(meta ? { meta } : {}) });
-    await memory.consolidate();
-  }
-
   async function say(userText: string): Promise<void> {
+    judgedThisTurn = false;
     try {
       await observeHop('user', userText, 'input');
-      deps.emit({ kind: 'memory', snapshot: snapshot(userText) });
 
       const messages: ApiMessage[] = [{ role: 'user', content: userText }];
       let calls = 0;
@@ -133,16 +147,13 @@ export function createSession(deps: SessionDeps): Session {
           break;
         }
         const system = `${SYSTEM}\n\n${await assembleForPrompt(userText)}`;
-        deps.emit({ kind: 'memory', snapshot: snapshot(userText) });
-
         const completion = await deps.provider.complete(system, messages, TOOL_SPECS);
         calls += 1;
         messages.push({ role: 'assistant', content: completion.raw });
 
         if (completion.text.trim()) {
-          await observeHop('assistant', completion.text, 'output');
           deps.emit({ kind: 'assistant', text: completion.text });
-          deps.emit({ kind: 'memory', snapshot: snapshot(userText) });
+          await observeHop('assistant', completion.text, 'output');
         }
 
         if (!completion.toolCalls.length) {
@@ -155,21 +166,16 @@ export function createSession(deps: SessionDeps): Session {
 
         for (const call of completion.toolCalls) {
           const callText = `${call.name}(${JSON.stringify(call.input)})`;
-          await observeHop('tool', callText, 'tool_call', { tool: call.name });
           deps.emit({ kind: 'tool_call', name: call.name, input: call.input });
-          deps.emit({ kind: 'memory', snapshot: snapshot(userText) });
+          await observeHop('tool', callText, 'tool_call', { tool: call.name });
 
           let output: string;
-
           if (MUTATING.has(call.name)) {
-            // A write to production. If memory flagged it (irreversible-action
-            // rubric), use that card; otherwise raise one for the write itself.
             const card = memory.pending()[0] ?? synthCard(call, memory.turn());
             deps.emit({ kind: 'card', card });
             const ans = await deps.askHuman(card);
             memory.answer(card.print, ans.answer, ans.text);
-            deps.emit({ kind: 'memory', snapshot: snapshot(userText) });
-
+            flushTrace('tool_call');
             if (ans.answer === 'pause') {
               output = 'Human paused the response. Do not apply any change; wait for instructions.';
               paused = true;
@@ -182,14 +188,12 @@ export function createSession(deps: SessionDeps): Session {
             output = executeTool(call.name, call.input);
           }
 
-          results.push(toolResultBlock(call.id, output));
-          await observeHop('tool', output, 'tool_result', { tool: call.name, status: paused ? 'paused' : 'completed' });
+          results.push({ type: 'tool_result', tool_use_id: call.id, content: output });
           deps.emit({ kind: 'tool_result', name: call.name, output });
-          deps.emit({ kind: 'memory', snapshot: snapshot(userText) });
+          await observeHop('tool', output, 'tool_result', { tool: call.name, status: paused ? 'paused' : 'completed' });
         }
 
         messages.push({ role: 'user', content: results });
-
         if (paused) {
           deps.emit({ kind: 'done', usage: completion.usage });
           break;
@@ -203,11 +207,10 @@ export function createSession(deps: SessionDeps): Session {
   return { memory, say };
 }
 
-/** A card for a write that memory did not independently flag. */
 function synthCard(call: ToolCall, turn: number): Card {
   return {
     print: `write:${call.name}:${turn}`,
-    rubric: 'irreversible action',
+    rubric: 'Irreversible action',
     says: `Apply to production: ${String(call.input['action'] ?? call.name)}`,
     confidence: 1,
     alert: 1,

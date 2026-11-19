@@ -34,14 +34,19 @@ test('the loop instruments every hop, and memory drives a bounded prompt', async
   assert.ok(events.some((e) => e.kind === 'tool_call' && e.name === 'apply_mitigation'));
   assert.ok(events.some((e) => e.kind === 'tool_result' && e.output.startsWith('Applied:')));
 
-  // The meter is driven live, and the prompt stays bounded regardless of how
+  // Trace rows are classified by mechanism tier, and the deterministic tiers fire.
+  const trace = events.filter((e): e is Extract<LoopEvent, { kind: 'trace' }> => e.kind === 'trace');
+  assert.ok(trace.some((t) => t.row.tier === 'code'), 'a code-tier decision was traced');
+  assert.ok(trace.some((t) => t.row.tier === 'human'), 'a human-tier decision was traced');
+
+  // The stat meter is driven live, and the prompt stays bounded regardless of how
   // much the full history grows. (The size win over naive history at scale is
   // asserted separately, over 120 turns, in bench.test.ts.)
-  const snaps = events.filter((e): e is Extract<LoopEvent, { kind: 'memory' }> => e.kind === 'memory');
-  const last = snaps[snaps.length - 1];
-  assert.ok(last, 'at least one memory snapshot');
-  assert.ok(last.snapshot.naiveTokens > 0, 'full-history baseline is tracked');
-  assert.ok(last.snapshot.memoryTokens < 500, 'disclosed prompt stays bounded');
+  const stats = events.filter((e): e is Extract<LoopEvent, { kind: 'stat' }> => e.kind === 'stat');
+  const last = stats[stats.length - 1];
+  assert.ok(last, 'at least one stat');
+  assert.ok(last.naiveTokens > 0, 'full-history baseline is tracked');
+  assert.ok(last.memoryTokens < 500, 'disclosed prompt stays bounded');
 });
 
 test('a human pause stops the write before it runs', async () => {

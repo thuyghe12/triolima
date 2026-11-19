@@ -131,10 +131,19 @@ Wrapping an existing agent loop is a few lines. The whole audit trail is
 
 ## Try the live demo
 
-A **real Claude agent** working an SRE incident, with Triolima's memory visualised
-live — the chat, the audit tree coloured by actor, the three layers, and a token
-meter contrasting the bounded prompt against naive full history. Nothing is
-scripted.
+A **real Claude agent** working an SRE incident, in an elegant dual panel. Left:
+the chat. Right (collapsible): a **live trace of every hop**, where each decision
+is classified by the mechanism that handled it —
+
+- **code** — a closed option set, one right answer (regex, a threshold). $0, sub-ms.
+- **decision** — a known set of outcomes over variable input: a transparent scored gate.
+- **llm** — open-ended and subjective: a narrow model, used only as a fallback.
+- **human** — critical and non-negotiable: it pauses and asks.
+
+A **Rubric** tab makes that policy yours to own — every item shows *what* it watches,
+*how* it is evaluated, and *why* it sits in its tier. The point is the escalation
+ladder: the cheapest mechanism that can be trusted with each signal, and never more.
+Nothing is scripted.
 
 ```bash
 git clone https://github.com/thuyghe12/triolima.git
@@ -150,9 +159,10 @@ this way avoids a dotenv gotcha — it reads the *first* `ANTHROPIC_API_KEY=` li
 so overwriting is cleaner than appending to the template.
 
 Ask it to **`Investigate INC-7788 on payments-api.`** The agent calls real tools
-(`get_incident`, `get_metrics`, `search_runbooks`), Triolima pins the hard facts
-and extracts the root cause, and when the agent moves to apply an irreversible
-mitigation the loop **pauses for you** — *keep going · pause · correct*.
+(`get_incident`, `get_metrics`, `search_runbooks`); the trace fills in real time —
+hard facts pinned by **code**, root cause gated by a **decision**, blast radius
+judged by a **narrow LLM**, and the irreversible mitigation **routed to you** —
+*keep going · pause · correct*.
 
 - The key is read **server-side only** and never reaches the browser; use your own.
 - The default model is the cheapest (`claude-haiku-5-5`); set `ANTHROPIC_MODEL` to

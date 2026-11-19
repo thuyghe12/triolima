@@ -3,73 +3,69 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Triolima — live memory</title>
+    <title>Triolima</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <header class="top">
-      <div class="brand">
-        <span class="mark">◢◣</span>
-        <div>
-          <h1>Triolima</h1>
-          <p>a real agent · memory that remembers by meaning, not age</p>
-        </div>
-      </div>
-      <div class="status" id="status"><span class="dot"></span><span id="status-text">connecting…</span></div>
-    </header>
+    <div class="app" id="app">
+      <!-- LEFT · chat -->
+      <section class="chat">
+        <header class="chat-head">
+          <div class="brand">
+            <span class="logo">△</span>
+            <span class="name">Triolima</span>
+            <span class="tagline">incident assistant</span>
+          </div>
+          <div class="conn" id="conn"><i></i><span id="conn-text">connecting</span></div>
+        </header>
 
-    <main class="grid">
-      <!-- Chat -->
-      <section class="pane chat">
-        <h2>Incident channel</h2>
-        <div class="log" id="chat"></div>
+        <div class="stream" id="chat"></div>
+
+        <div class="chips" id="chips"></div>
         <form class="composer" id="composer">
-          <input id="input" autocomplete="off" placeholder="e.g. Investigate INC-7788 on payments-api." />
-          <button type="submit" id="send">Send</button>
+          <input id="input" autocomplete="off" placeholder="Investigate INC-7788 on payments-api." />
+          <button type="submit" aria-label="Send">↵</button>
         </form>
-        <div class="suggest" id="suggest"></div>
       </section>
 
-      <!-- Audit tree -->
-      <section class="pane tree">
-        <h2>Audit tree <small>every op, by actor</small></h2>
+      <!-- RIGHT · trace / rubric -->
+      <aside class="side" id="side">
+        <header class="side-head">
+          <div class="tabs" id="tabs">
+            <button data-tab="trace" class="on">Trace</button>
+            <button data-tab="rubric">Rubric</button>
+          </div>
+          <button class="hide" id="hide" title="Collapse">⟩</button>
+        </header>
+
         <div class="legend" id="legend"></div>
-        <div class="log" id="tree"></div>
-      </section>
 
-      <!-- Memory -->
-      <section class="pane memory">
-        <h2>Memory</h2>
-        <div class="meter">
-          <div class="meter-row"><span>naive full history</span><b id="naive-tok">0</b></div>
-          <div class="bar"><i id="naive-bar" class="fill naive"></i></div>
-          <div class="meter-row"><span>Triolima (sent to model)</span><b id="mem-tok">0</b></div>
-          <div class="bar"><i id="mem-bar" class="fill mem"></i></div>
-          <p class="meter-note" id="meter-note"></p>
+        <div class="panel" id="panel-trace">
+          <div class="trace" id="trace"></div>
+          <p class="empty" id="trace-empty">Every hop, classified live by the mechanism that handled it.</p>
         </div>
 
-        <h3>L1 · pinned <small>verbatim, never dropped</small></h3>
-        <div class="chips" id="pins"></div>
+        <div class="panel" id="panel-rubric" hidden>
+          <p class="lead">The policy, and you own it. Each signal is routed to the cheapest mechanism that can be trusted with it.</p>
+          <div class="rubric" id="rubric"></div>
+        </div>
 
-        <h3>L2 · verified signals <small>rubric · confidence · decay</small></h3>
-        <div class="facts" id="verified"></div>
+        <footer class="stat" id="stat"></footer>
+      </aside>
 
-        <h3>L3 · deep archive</h3>
-        <p class="archive" id="archive">0 facts held, fetched only on demand.</p>
-      </section>
-    </main>
+      <button class="reopen" id="reopen" title="Show trace">Trace ⟨</button>
+    </div>
 
-    <!-- HITL card -->
     <div class="overlay" id="overlay" hidden>
       <div class="card">
-        <div class="card-tag" id="card-tag">irreversible action</div>
+        <div class="card-tier"><i></i><span>human · non-negotiable</span></div>
         <p class="card-says" id="card-says"></p>
         <p class="card-meta" id="card-meta"></p>
-        <input id="card-correct" placeholder="correction (for “correct”)…" hidden />
+        <input id="card-correct" placeholder="what to do instead…" hidden />
         <div class="card-actions">
           <button data-answer="keep_going" class="ok">Keep going</button>
           <button data-answer="pause" class="warn">Pause</button>
-          <button data-answer="correct" class="alt">Correct…</button>
+          <button data-answer="correct" class="alt">Correct</button>
         </div>
       </div>
     </div>
