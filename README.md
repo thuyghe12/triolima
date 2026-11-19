@@ -131,24 +131,33 @@ Wrapping an existing agent loop is a few lines. The whole audit trail is
 
 ## Try the live demo
 
-A **real, user-led Claude agent** — an empty thread, you talk, it answers — in a
-dual panel. Left: the chat. Right (collapsible): a **live, per-hop trace** (OTel-
-style spans with real durations) of everything that happens to a turn — input,
-every watcher that acts, memory assemble, the `llm.request` (real tokens + latency),
-`recall`, output. Nothing is scripted and there is no scenario.
+A **real Claude Code agent** — driven by the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk),
+an empty thread, you talk, it answers — governed by Triolima from inside the
+harness's own hooks, on-device. Dual panel: left the chat, right (collapsible) a
+**live, per-hop trace** of the real Claude Code lifecycle — `input`, every watcher
+that acts, `recall`, `output`, and the real `model.response` (actual tokens,
+latency and cost). Nothing is scripted and there is no scenario.
 
-Each signal is handled by a watcher, routed to the cheapest mechanism that can be
-trusted with it:
+How Triolima plugs in (no OTLP relay, no settings wiring — it's all in-process):
+
+- **`UserPromptSubmit` hook** → runs the watchdogs and **injects the governed
+  memory** into the agent's context as `additionalContext`. This is how a memory
+  layer feeds a harness it doesn't own.
+- **`PreToolUse` / `PostToolUse` hooks** → observe the tool hops, run the watchdogs.
+- **`canUseTool`** → the permission gate (keeps it a chat + `recall` agent).
+- **the SDK message stream** → real assistant text and real `usage` / `total_cost_usd`.
+
+Every signal is a watcher, routed to the cheapest mechanism that can be trusted
+with it — and **all enabled watchers run every turn**:
 
 - **code** — a closed option set, one right answer (regex, a threshold). $0, sub-ms.
 - **decision** — a known set of outcomes over variable input: a transparent scored gate.
-- **llm** — open-ended and subjective: a narrow model, used only as a fallback.
+- **llm** — open-ended and subjective: a narrow model, used only when the turn warrants it.
 - **human** — critical and non-negotiable: it pauses and asks.
 
 The **Rubric** tab is that policy, and it's yours to own: every watcher shows its
-signal, *how* it is evaluated and *why* it sits in its tier — and you can toggle,
-retune, or **add your own**. The agent's only tool is `recall`, which searches its
-own Triolima memory, so the trace shows genuine tool hops.
+signal, *how* it is evaluated and *why* it sits in its tier — toggle, retune, or
+**add your own**.
 
 ```bash
 git clone https://github.com/thuyghe12/triolima.git
@@ -158,26 +167,25 @@ npm install
 npm run demo
 ```
 
-Replace `sk-ant-your-key-here` with your own key before running the `printf` line
-(or edit `.env` afterwards), then open **http://localhost:5173**. Writing `.env`
-this way avoids a dotenv gotcha — it reads the *first* `ANTHROPIC_API_KEY=` line,
-so overwriting is cleaner than appending to the template.
+Replace `sk-ant-your-key-here` with your own key first, then open
+**http://localhost:5173**. `npm install` pulls the Agent SDK, which ships its own
+runtime per-platform — **no separate `claude` CLI to install.** Writing `.env` by
+overwriting avoids a dotenv gotcha (it reads the *first* `ANTHROPIC_API_KEY=` line).
 
-Then just talk. Say something like *“My email is me@acme.com, I prefer Karla, and
-please delete the old draft.”* and watch the trace: **Identifiers** pins the email
-(code), **Preferences** extracts a fact (decision), **Tone** is judged by a narrow
-**LLM** only because the turn looks loaded, and **Sensitive actions** catches
-“delete” and **pauses for you** (human) — *keep going · pause · correct*.
+Then just talk — e.g. *“My email is me@acme.com and I prefer the Karla font.
+Remember that.”* Watch the trace: **Identifiers** pins the email (code),
+**Preferences** extracts a fact (decision), the agent replies with those facts
+already in its context, and `model.response` shows the real latency and cost. Say
+something like *“delete my account”* and **Sensitive actions** (human) pauses the
+turn for you — *keep going · pause · correct*.
 
 - The key is read **server-side only** and never reaches the browser; use your own.
-- The default model is the cheapest (`claude-haiku-5-5`); set `ANTHROPIC_MODEL` to
-  change it. The loop is cost-capped per message.
-- Capture is wired by **owning the loop** — `observe()` at every hop (input,
-  tool_call, tool_result, output). Why not OpenTelemetry: [ADR 0003](docs/adr/0003-capture-is-an-adapter.md).
+- Default model is the cheapest (`haiku`); set `ANTHROPIC_MODEL` to change it.
+- Why the Agent SDK (observe + govern + inject) over a relay: [ADR 0003](docs/adr/0003-capture-is-an-adapter.md).
 
-The loop's plumbing (every hop observed, memory driving the prompt, the pause
-stopping a write) is covered by tests that run in CI with a scripted model, so the
-demo needs no key to stay green — only to run for real.
+The memory governance each watcher runs is covered by tests on the engine directly
+(no key, no subprocess), so CI stays green; the live agent integration is validated
+by typecheck and a real run.
 
 ## Status
 

@@ -1,55 +1,57 @@
-# 3. Capture is an adapter; the demo owns the loop
+# 3. Capture is an adapter; the demo governs a real agent via the Agent SDK
 
 Date: 2026-11-19
 
 ## Status
 
-Accepted.
+Accepted. (Supersedes the earlier framing of this ADR, which assumed the demo
+owned its own Messages-API loop.)
 
 ## Context
 
-Memory has to be fed from *somewhere*: the agent's turns, tool calls and results
-have to reach `observe()`. There are two ways to capture them.
+Memory has to be fed from *somewhere*, and its decisions have to be *applied*
+somewhere. For the demo we want a **real** agent, **real** per-hop tracing, and
+Triolima actually governing it — injecting memory, running the watchdogs, pausing
+for a human — not a mock.
 
-1. **Own the loop.** When we write the agent loop ourselves — as the demo does,
-   over the Anthropic Messages API — we call `observe()` directly at each hop
-   (input, tool_call, tool_result, output). Nothing is inferred; capture is
-   complete and synchronous.
-2. **Adapt an external runtime.** When the loop belongs to someone else (Claude
-   Code, another framework), we cannot insert calls into it. We instead consume
-   what it emits — OpenTelemetry spans, or process hooks — and map those onto the
-   same four hops.
+Three ways to get there were on the table:
 
-A natural question, given the earlier Teolima work used OpenTelemetry: should the
-core depend on OTel? And does an Anthropic API key give us OTel to work with?
-
-It does not. OpenTelemetry tracing in the earlier work came from *Claude Code the
-harness* emitting spans — not from the model API. An Anthropic key is a key to
-the Messages API; it carries no tracing channel. So for an app that owns its loop,
-there is nothing to consume: you simply instrument the hops you already control.
+1. **Own the loop (Messages API).** We write the agent loop and call `observe()`
+   at each hop directly. Full control, but the "agent" is our own thin loop, and
+   the trace is only what we instrument — not a real harness's lifecycle.
+2. **Observe a vanilla Claude Code agent over OTLP.** Wire Claude Code's native
+   telemetry to a local relay (the approach the Teolima work used). Real hops, on
+   device — but observe-only: we cannot inject governed memory into Claude Code's
+   context, which is the whole point of a *memory* product.
+3. **Drive Claude Code as a library (the Claude Agent SDK).** We don't own the
+   loop; the harness does. But its in-process hooks let us do everything at once.
 
 ## Decision
 
-`observe()` is the capture seam, and capture is an **adapter**, never part of the
-core.
+The demo uses the **Claude Agent SDK**. Capture — and injection, and governance —
+is an **adapter** onto the harness's own instrumentation, in-process, on-device:
 
-- The core library and the demo **own the loop** and instrument the four hops
-  directly. This is the simplest and most complete path, and it is what ships.
-- OTel / hooks ingestion is an **optional adapter** for external runtimes, mapping
-  spans or hook events onto the same `Turn` + `Hop` vocabulary. It is documented
-  here as the extension point; no code depends on it, and the core stays
-  zero-dependency and isomorphic.
+- **`UserPromptSubmit` hook** runs the watchdogs and returns the Triolima memory
+  block as `additionalContext` — the injection seam. A memory layer feeds a
+  harness it does not own without touching the harness's code.
+- **`PreToolUse` / `PostToolUse` hooks** observe the tool hops and run the watchdogs.
+- **`canUseTool`** is the permission gate; hooks are async, so a human-in-the-loop
+  card can `await` a person's answer *mid-turn* and genuinely pause the real agent.
+- **The SDK message stream** gives real assistant text and real `usage` /
+  `total_cost_usd` / `duration_api_ms`, so the trace shows real tokens, latency and
+  cost — no fabricated spans.
 
-The `Hop` type (`input | tool_call | tool_result | output`) is deliberately the
-intersection of what an owned loop can emit and what an external runtime's trace
-exposes, so both adapters produce the same shape.
+The core memory engine stays model-free and zero-dependency; the Agent SDK and the
+hooks live only in `demo/`.
 
 ## Consequences
 
-- The demo is honest: a real agent, real tools, real model calls, with capture
-  wired in four lines — no tracing backend to stand up on the interviewer's
-  laptop.
-- Pointing Triolima at an external runtime later is an adapter, not a rewrite:
-  translate its events to `Turn`s and the three tiers are unchanged.
-- We take no dependency on OpenTelemetry in the core, and make no claim that an
-  API key provides tracing — because it doesn't.
+- The demo is honest: a real Claude Code agent, real hops, real cost — and
+  Triolima provably governs it (injects memory, extracts, pauses).
+- `npm install` pulls the Agent SDK, which ships a per-platform runtime, so there
+  is no separate `claude` CLI to install — it runs with `npm run demo` and a key.
+- Capture/injection is an adapter: the same three tiers (code · decision · llm ·
+  human) could later be pointed at a different runtime by writing new hook
+  adapters, without changing the engine.
+- The memory config is baked at session start, so editing the rubric restarts the
+  agent session — a known limitation of this adapter, fixable later.

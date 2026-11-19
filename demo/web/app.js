@@ -130,7 +130,10 @@ function pushRubric() { send({ type: 'rubric', watchers }); }
 // ───────── stat ─────────
 function renderStat(s) {
   const win = s.memoryTokens > 0 && s.naiveTokens > s.memoryTokens ? `<span class="win">${(s.naiveTokens / s.memoryTokens).toFixed(1)}× leaner</span>` : '';
-  $('stat').innerHTML = `prompt <b>${s.memoryTokens.toLocaleString()}</b> tok · naive <b>${s.naiveTokens.toLocaleString()}</b> tok${win}`;
+  const real = typeof s.usageIn === 'number'
+    ? ` · model <b>${s.usageIn.toLocaleString()}→${(s.usageOut ?? 0).toLocaleString()}</b>${typeof s.costUsd === 'number' ? ` · <b>$${s.costUsd.toFixed(4)}</b>` : ''}`
+    : '';
+  $('stat').innerHTML = `memory <b>${s.memoryTokens.toLocaleString()}</b> tok${real}${win}`;
 }
 
 // ───────── HITL card ─────────

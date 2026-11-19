@@ -110,7 +110,7 @@ export function configFrom(watchers: Watcher[]): Config {
   const rubrics = [
     rubric('decisions', ['let us go with', "let's go with", 'we decided', 'decided to', 'final', 'go with', 'agreed', 'decision is', 'i choose', 'we will use']),
     rubric('preferences', ['i prefer', 'prefer', 'always', 'never', 'call me', 'i like', 'i want', 'i need', 'my name is', 'from now on']),
-    rubric('sensitive', ['delete', 'remove', 'send', 'email', 'pay', 'purchase', 'publish', 'deploy', 'wipe', 'cancel'], 0.5),
+    rubric('sensitive', ['delete', 'remove', 'wipe', 'erase', 'pay ', 'purchase', 'charge', 'transfer', 'publish', 'deploy', 'cancel'], 0.5),
   ].filter((r): r is NonNullable<typeof r> => r != null);
   return {
     pins: on.some((w) => w.id === 'identifiers')
