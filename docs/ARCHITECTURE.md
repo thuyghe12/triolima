@@ -54,10 +54,11 @@ whole history of a conversation's memory is one inspectable DAG.
 
 ## The demo
 
-`demo/` is a working proof, not a mock: a real Claude agent works an SRE incident
-in a dual panel — chat on the left, and on the right a **live trace of every hop,
-classified by the mechanism that handled it** (code · decision · narrow-LLM ·
-human), plus a Rubric tab where that policy is owned and inspected. The tiering is
+`demo/` is a working proof, not a mock: a real, user-led Claude agent (empty thread,
+no scenario) in a dual panel — chat on the left, and on the right a **live per-hop
+trace** (OTel-style spans with real durations) where each operation is **classified
+by the mechanism that handled it** (code · decision · narrow-LLM · human), plus a
+Rubric tab where that policy is owned, retuned and extended. The tiering is
 the thesis made visible: each signal is routed to the cheapest mechanism that can
 be trusted with it, escalating to a human only for the critical, non-negotiable
 ones. `demo/agent/loop.ts` is the whole integration — `observe` at each hop,

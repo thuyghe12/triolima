@@ -1,83 +1,68 @@
 /**
- * The demo's agent loop, exercised end-to-end with a scripted model — so CI
- * proves the wiring (every hop observed, memory driving the prompt, the HITL
- * pause stopping a write) with no key and no network. The demo itself always
- * runs a real model; this only guards the plumbing around it.
+ * The agent loop, exercised end-to-end with a scripted model — so CI proves the
+ * wiring (real per-hop spans, memory governing the prompt, the recall tool, the
+ * content-raised human card) with no key and no network. The app always runs a
+ * real model; this only guards the plumbing around it.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSession, type LoopEvent } from '../demo/agent/loop';
+import { createSession, type LoopEvent, type Span } from '../demo/agent/loop';
 import { scripted } from '../demo/agent/provider';
 
-test('the loop instruments every hop, and memory drives a bounded prompt', async () => {
+const spans = (events: LoopEvent[]): Span[] =>
+  events.filter((e): e is Extract<LoopEvent, { kind: 'span' }> => e.kind === 'span').map((e) => e.span);
+
+test('instruments every hop as a span, pins identifiers, and runs recall', async () => {
   const events: LoopEvent[] = [];
   const provider = scripted([
-    { text: 'Looking into INC-7788.', toolCalls: [{ id: 't1', name: 'get_incident', input: { id: 'INC-7788' } }] },
-    { text: 'The connection pool is exhausted, traced to Stripe latency. Proposing a fix.', toolCalls: [{ id: 't2', name: 'apply_mitigation', input: { action: 'restart payments-api, raise pool to 400, enable circuit breaker' } }] },
-    { text: 'INC-7788 mitigated.' },
+    { text: 'Let me check.', toolCalls: [{ id: 't1', name: 'recall', input: { query: 'email' } }] },
+    { text: 'Your email is on file.' },
   ]);
   const session = createSession({ provider, emit: (e) => events.push(e), askHuman: () => Promise.resolve({ answer: 'keep_going' }) });
 
-  await session.say('Investigate INC-7788 on payments-api.');
+  await session.say('My email is a@b.com and my name is Thomas.');
 
-  // Tier 1 pinned the hard facts verbatim.
-  assert.ok(session.memory.store.pins().some((p) => p.text === 'INC-7788'));
-  assert.ok(session.memory.store.pins().some((p) => /payments-api/i.test(p.text)));
+  // Identifiers (code watcher) pinned the email verbatim.
+  assert.ok(session.memory.store.pins().some((p) => p.text.includes('@')), 'email pinned');
 
-  // All five actors acted on the one tree.
-  const actors = new Set(session.memory.tree.log().map((e) => e.actor));
-  for (const a of ['agent', 'fastpath', 'rubric', 'ranker', 'human'] as const) {
-    assert.ok(actors.has(a), `expected actor ${a} on the tree`);
+  // Real per-hop spans, not just input/output.
+  const kinds = new Set(spans(events).map((s) => s.kind));
+  for (const k of ['input', 'memory', 'llm', 'tool', 'output'] as const) {
+    assert.ok(kinds.has(k), `expected a ${k} span`);
   }
+  // A watcher span classified by tier.
+  assert.ok(spans(events).some((s) => s.kind === 'watcher' && s.tier === 'code'), 'a code-tier watcher span');
 
-  // Both hops surfaced as events, and the write ran after approval.
-  assert.ok(events.some((e) => e.kind === 'tool_call' && e.name === 'apply_mitigation'));
-  assert.ok(events.some((e) => e.kind === 'tool_result' && e.output.startsWith('Applied:')));
+  // recall actually ran.
+  assert.ok(events.some((e) => e.kind === 'tool_call' && e.name === 'recall'));
+  assert.ok(events.some((e) => e.kind === 'tool_result'));
 
-  // Trace rows are classified by mechanism tier, and the deterministic tiers fire.
-  const trace = events.filter((e): e is Extract<LoopEvent, { kind: 'trace' }> => e.kind === 'trace');
-  assert.ok(trace.some((t) => t.row.tier === 'code'), 'a code-tier decision was traced');
-  assert.ok(trace.some((t) => t.row.tier === 'human'), 'a human-tier decision was traced');
-
-  // The stat meter is driven live, and the prompt stays bounded regardless of how
-  // much the full history grows. (The size win over naive history at scale is
-  // asserted separately, over 120 turns, in bench.test.ts.)
+  // The disclosed prompt stays bounded; the baseline is tracked.
   const stats = events.filter((e): e is Extract<LoopEvent, { kind: 'stat' }> => e.kind === 'stat');
   const last = stats[stats.length - 1];
-  assert.ok(last, 'at least one stat');
-  assert.ok(last.naiveTokens > 0, 'full-history baseline is tracked');
-  assert.ok(last.memoryTokens < 500, 'disclosed prompt stays bounded');
+  assert.ok(last && last.naiveTokens > 0 && last.memoryTokens < 600);
 });
 
-test('a human pause stops the write before it runs', async () => {
+test('a sensitive action raises a card, and pause stops the turn', async () => {
   const events: LoopEvent[] = [];
-  const provider = scripted([
-    { toolCalls: [{ id: 't1', name: 'apply_mitigation', input: { action: 'restart payments-api' } }] },
-    { text: 'Holding off until you say otherwise.' },
-  ]);
+  const provider = scripted([{ text: 'should not run' }]);
   const session = createSession({ provider, emit: (e) => events.push(e), askHuman: () => Promise.resolve({ answer: 'pause' }) });
 
-  await session.say('Fix INC-7788 now.');
+  await session.say('Please delete my account now.');
 
-  // The mitigation never executed.
-  assert.ok(!events.some((e) => e.kind === 'tool_result' && e.output.startsWith('Applied:')));
-  // The human's answer is on the audit tree.
-  assert.ok(session.memory.tree.byActor('human').length >= 1);
-  // A card was surfaced for the write.
-  assert.ok(events.some((e) => e.kind === 'card'));
+  assert.ok(events.some((e) => e.kind === 'card'), 'a card was raised for the sensitive action');
+  assert.ok(session.memory.tree.byActor('human').length >= 1, 'the human answer is on the tree');
+  assert.ok(!events.some((e) => e.kind === 'assistant'), 'the model never ran after pause');
 });
 
-test('a correction blocks the write and feeds the agent back a note', async () => {
+test('correct records the note and lets the turn continue', async () => {
   const events: LoopEvent[] = [];
-  const provider = scripted([
-    { toolCalls: [{ id: 't1', name: 'apply_mitigation', input: { action: 'delete the connection pool' } }] },
-    { text: 'Understood — using the circuit breaker instead.' },
-  ]);
-  const session = createSession({ provider, emit: (e) => events.push(e), askHuman: () => Promise.resolve({ answer: 'correct', text: 'raise the pool, do not delete it' }) });
+  const provider = scripted([{ text: 'Understood.' }]);
+  const session = createSession({ provider, emit: (e) => events.push(e), askHuman: () => Promise.resolve({ answer: 'correct', text: 'archive it instead' }) });
 
-  await session.say('Resolve INC-7788.');
+  await session.say('delete the project');
 
-  const result = events.find((e) => e.kind === 'tool_result');
-  assert.ok(result && result.kind === 'tool_result' && /Human correction/.test(result.output));
-  assert.ok(!events.some((e) => e.kind === 'tool_result' && e.output.startsWith('Applied:')));
+  assert.ok(events.some((e) => e.kind === 'card'));
+  assert.ok(events.some((e) => e.kind === 'notice' && /archive it instead/.test(e.text)));
+  assert.ok(events.some((e) => e.kind === 'assistant'), 'the turn continued after the correction');
 });

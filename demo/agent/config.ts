@@ -1,110 +1,138 @@
 /**
- * The policy — and it IS the product.
+ * The watchers — a rubric you own, not a scripted scenario.
  *
- * Every signal the agent produces is handled by the *cheapest sufficient
- * mechanism*, chosen by two axes: how deterministic the decision is, and how
- * costly a wrong call would be. That gives four tiers:
+ * Each watcher is one scanner over the live hop stream, with a tight schema:
+ *   signal     — the one thing it watches for
+ *   rule/tier  — the mechanism that decides: code · decision · llm · human,
+ *                chosen by how deterministic the call is and how costly a wrong
+ *                one would be
+ *   threshold  — when it fires
+ *   action     — the one job it does on firing
+ *   owner      — who owns it
  *
- *   code     — a closed option set with one right answer. Regex / a scalar
- *              threshold. $0, sub-millisecond, always the same.
- *   decision — a known set of outcomes over semantically variable input. A
- *              transparent scored gate: structured, explainable, model-free.
- *   llm      — open-ended, subjective, no closed option set. A narrow model,
- *              used only as a fallback when the cheaper tiers are ambiguous.
- *   human    — critical and non-negotiable. The cost of being wrong is too high
- *              to automate; it pauses and asks a person.
- *
- * The user owns this table. The UI renders it, shows how each item is evaluated
- * and when it fired, and the trace tags every live event with its tier.
+ * These are general rules that make sense for any conversation — not a demo.
+ * The user can edit them and add their own. The engine config is derived from
+ * this table, so the rubric is the single source of truth.
  */
 import type { Config } from '../../src/index';
 
 export type Tier = 'code' | 'decision' | 'llm' | 'human';
+export type Action = 'pin' | 'prune' | 'fold' | 'extract' | 'judge' | 'ask';
 
-export interface PolicyItem {
+export interface Watcher {
   id: string;
   name: string;
+  /** The mechanism / rule that decides. */
   tier: Tier;
-  /** What it watches for. */
+  /** The one signal it watches for. */
+  signal: string;
+  /** The gate it fires at (null for always-on code watchers). */
+  threshold: number | null;
+  /** The one job it does when it fires. */
+  action: Action;
+  owner: string;
+  enabled: boolean;
+  /** Inspect copy. */
   what: string;
-  /** How it is evaluated — the mechanism, in one line. */
   how: string;
-  /** Why it sits in this tier — the risk / determinism rationale. */
   why: string;
 }
 
-export const POLICY: PolicyItem[] = [
+export const WATCHERS: Watcher[] = [
   {
-    id: 'pins', name: 'Hard facts', tier: 'code',
-    what: 'Incident IDs, service names, amounts.',
+    id: 'identifiers', name: 'Identifiers', tier: 'code',
+    signal: 'emails · URLs · IDs · amounts · dates', threshold: null, action: 'pin', owner: 'you', enabled: true,
+    what: 'Hard facts: an email, a URL, a ticket id, a number, a date.',
     how: 'Regex match; pinned verbatim, never dropped.',
-    why: 'A closed set with one right answer. Nothing to judge — pure code, $0, sub-ms.',
+    why: 'A closed form with one right answer. Nothing to judge — pure code, $0, sub-ms.',
   },
   {
-    id: 'prune', name: 'Filler pruning', tier: 'code',
-    what: 'Low-signal turns — “thanks”, “one sec”.',
+    id: 'filler', name: 'Filler', tier: 'code',
+    signal: 'low-signal turns', threshold: 0.35, action: 'prune', owner: 'you', enabled: true,
+    what: '“thanks”, “ok”, “one sec” — turns that carry no information.',
     how: 'A deterministic entropy score below a fixed floor.',
     why: 'A scalar threshold: same input, same output. No model needed.',
   },
   {
-    id: 'fold', name: 'Task folding', tier: 'code',
-    what: 'A finished sub-task — a tool sequence that completed.',
-    how: 'Boundary detection, then collapse to one receipt line.',
-    why: 'Structural and deterministic — read from the hop, not its meaning.',
-  },
-  {
-    id: 'Root cause', name: 'Root cause', tier: 'decision',
-    what: 'The stated cause of the incident.',
+    id: 'decisions', name: 'Decisions', tier: 'decision',
+    signal: 'a choice being made', threshold: 0.6, action: 'extract', owner: 'you', enabled: true,
+    what: '“let’s go with…”, “we decided…”, “final answer is…”.',
     how: 'Cue coverage → a confidence score → a threshold gate.',
-    why: 'A known outcome (cause / not) over variable wording. Structured, so a scored decision — not a fixed rule, not yet a model.',
+    why: 'A known outcome (a decision was made / not) over variable wording — a scored decision, not a fixed rule.',
   },
   {
-    id: 'Mitigation', name: 'Mitigation', tier: 'decision',
-    what: 'The proposed fix — breaker, pool size, backoff.',
-    how: 'Cue coverage → score → gate; the same engine as root cause.',
-    why: 'Known shape, variable phrasing. A decision over semantics.',
+    id: 'preferences', name: 'Preferences', tier: 'decision',
+    signal: 'a stated preference', threshold: 0.55, action: 'extract', owner: 'you', enabled: true,
+    what: '“I prefer…”, “always…”, “never…”, “call me…”.',
+    how: 'Cue coverage → score → gate; the same engine as decisions.',
+    why: 'Stable, reusable facts about the person. Known shape, variable phrasing.',
   },
   {
-    id: 'Blast radius', name: 'Blast radius', tier: 'llm',
-    what: 'How bad is this, really — the subjective severity call.',
-    how: 'A narrow LLM judges, only when the cheaper tiers are ambiguous.',
-    why: 'Open-ended, no closed option set. Only a model (or a person) can weigh it — the expensive tier, used as a fallback.',
+    id: 'tone', name: 'Tone', tier: 'llm',
+    signal: 'subjective sentiment', threshold: 0.5, action: 'judge', owner: 'you', enabled: true,
+    what: 'Is the person calm, pleased, frustrated, urgent?',
+    how: 'A narrow LLM judges, only when the turn looks emotionally loaded.',
+    why: 'Open-ended and subjective — no closed option set. Only a model can weigh it, and only when it is worth the call.',
   },
   {
-    id: 'Irreversible action', name: 'Irreversible action', tier: 'human',
-    what: 'restart · failover · rollback · delete.',
-    how: 'Crosses an alert gate → raises a card → a person decides.',
-    why: 'Critical and non-negotiable. Too costly to get wrong — it must be human.',
+    id: 'sensitive', name: 'Sensitive actions', tier: 'human',
+    signal: 'delete · send · pay · publish · email', threshold: 0.5, action: 'ask', owner: 'you', enabled: true,
+    what: 'Talk of an irreversible or costly action.',
+    how: 'Crosses an alert gate → raises a card → you decide before it continues.',
+    why: 'Critical and non-negotiable. Too costly to get wrong — it must be a person.',
   },
 ];
 
-export const TIER_BY_ITEM: Record<string, Tier> = Object.fromEntries(POLICY.map((p) => [p.name, p.tier]));
-
-// The engine config is derived from the policy: code items are pins + the
-// deterministic fast path; decision + human items are rubrics; the llm item is
-// handled by the loop's judge, off the core (which stays model-free).
-export const MEMORY_CONFIG: Config = {
-  pins: [/INC-\d+/, /\bpayments-api\b/i, /\bconnection pool\b/i, /USD\s?[\d,]+/],
-  rubrics: [
-    { name: 'Root cause', cues: ['root cause', 'traced to', 'caused by', 'because', 'due to', 'exhausted', 'saturated'], threshold: 0.6, weight: 2.5 },
-    { name: 'Mitigation', cues: ['mitigation', 'circuit breaker', 'raise pool', 'backoff', 'scale', 'enable'], threshold: 0.55, weight: 1.8 },
-    { name: 'Irreversible action', cues: ['restart', 'failover', 'rollback', 'delete'], threshold: 0.5, weight: 2, alert: 0.5 },
-  ],
-  budget: { hotFacts: 6, retrieveK: 4, halfLifeTurns: 10 },
+export const WATCHER_BY_ID: Record<string, Watcher> = Object.fromEntries(WATCHERS.map((w) => [w.id, w]));
+/** Core rubric names → watcher id, for mapping tree commits back to a watcher. */
+export const WATCHER_BY_RUBRIC: Record<string, string> = {
+  'Decisions': 'decisions',
+  'Preferences': 'preferences',
+  'Sensitive actions': 'sensitive',
+};
+/** Tree op → watcher id, for the fast-path and human ops. */
+export const WATCHER_BY_OP: Record<string, string> = {
+  pin: 'identifiers',
+  prune: 'filler',
+  fold: 'identifiers',
+  alert: 'sensitive',
+  answer: 'sensitive',
 };
 
+/** Build the engine Config from an (editable) set of watchers. */
+export function configFrom(watchers: Watcher[]): Config {
+  const on = watchers.filter((w) => w.enabled);
+  const rubric = (id: string, cues: string[], alert?: number) => {
+    const w = on.find((x) => x.id === id);
+    if (!w) return null;
+    return { name: w.name, cues, threshold: w.threshold ?? 0.6, weight: w.tier === 'human' ? 2 : 1.8, ...(alert != null ? { alert } : {}) };
+  };
+  const rubrics = [
+    rubric('decisions', ['let us go with', "let's go with", 'we decided', 'decided to', 'final', 'go with', 'agreed', 'decision is', 'i choose', 'we will use']),
+    rubric('preferences', ['i prefer', 'prefer', 'always', 'never', 'call me', 'i like', 'i want', 'i need', 'my name is', 'from now on']),
+    rubric('sensitive', ['delete', 'remove', 'send', 'email', 'pay', 'purchase', 'publish', 'deploy', 'wipe', 'cancel'], 0.5),
+  ].filter((r): r is NonNullable<typeof r> => r != null);
+  return {
+    pins: on.some((w) => w.id === 'identifiers')
+      ? [/\b[\w.+-]+@[\w-]+\.[\w.-]+\b/, /\bhttps?:\/\/\S+/, /\b[A-Z]{2,}-\d+\b/, /\$\s?[\d,]+(?:\.\d+)?/, /\b\d{4}-\d{2}-\d{2}\b/]
+      : [],
+    rubrics,
+    budget: { hotFacts: 6, retrieveK: 4, halfLifeTurns: 12 },
+  };
+}
+
+export const MEMORY_CONFIG: Config = configFrom(WATCHERS);
+
+/** Minimal, honest system framing — the memory block is appended by the loop. */
 export const SYSTEM = [
-  'You are an on-call SRE incident assistant. Investigate incidents with the tools:',
-  'get_incident, get_metrics and search_runbooks to diagnose, then apply_mitigation to act.',
-  '',
-  'The MEMORY block below is your working memory, maintained by Triolima. It holds',
-  'what matters from the incident so far — you are NOT shown the full transcript, so',
-  'rely on it. Be concise and concrete. When you have a root cause and the right',
-  'mitigation, call apply_mitigation; a human may be asked to approve before it runs.',
+  'You are a helpful assistant with persistent memory across this conversation.',
+  'The MEMORY block below is maintained for you by Triolima from everything said so far',
+  '— rely on it rather than asking the person to repeat themselves. If you need something',
+  'that is not in it, call recall(query) to search your deeper memory. Be natural and concise.',
 ].join('\n');
 
-/** The narrow-LLM tier: a subjective severity call, used only as a fallback. */
+/** The narrow-LLM tier: a subjective tone read, only when a turn looks loaded. */
 export const JUDGE_SYSTEM =
-  'You are a severity judge for an SRE incident. Given the latest update, classify the blast radius as one of: contained, elevated, severe. Answer with exactly one word, then a space, then a confidence 0-1. Example: "severe 0.8".';
+  'Classify the tone of the user message as exactly one word (calm, pleased, frustrated, urgent, anxious), then a space, then a confidence 0-1. Example: "frustrated 0.8".';
 
-export const JUDGE_CUES = ['root cause', 'caused', 'because', 'due to', 'exhausted', 'impact', 'checkout', 'customers', '503', 'outage'];
+export const JUDGE_CUES = ['!', '?', 'urgent', 'asap', 'now', 'frustrat', 'angry', 'annoy', 'love', 'hate', 'please', 'wrong', 'broken', 'stupid', 'why', 'stuck', 'help'];

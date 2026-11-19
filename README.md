@@ -131,19 +131,24 @@ Wrapping an existing agent loop is a few lines. The whole audit trail is
 
 ## Try the live demo
 
-A **real Claude agent** working an SRE incident, in an elegant dual panel. Left:
-the chat. Right (collapsible): a **live trace of every hop**, where each decision
-is classified by the mechanism that handled it —
+A **real, user-led Claude agent** — an empty thread, you talk, it answers — in a
+dual panel. Left: the chat. Right (collapsible): a **live, per-hop trace** (OTel-
+style spans with real durations) of everything that happens to a turn — input,
+every watcher that acts, memory assemble, the `llm.request` (real tokens + latency),
+`recall`, output. Nothing is scripted and there is no scenario.
+
+Each signal is handled by a watcher, routed to the cheapest mechanism that can be
+trusted with it:
 
 - **code** — a closed option set, one right answer (regex, a threshold). $0, sub-ms.
 - **decision** — a known set of outcomes over variable input: a transparent scored gate.
 - **llm** — open-ended and subjective: a narrow model, used only as a fallback.
 - **human** — critical and non-negotiable: it pauses and asks.
 
-A **Rubric** tab makes that policy yours to own — every item shows *what* it watches,
-*how* it is evaluated, and *why* it sits in its tier. The point is the escalation
-ladder: the cheapest mechanism that can be trusted with each signal, and never more.
-Nothing is scripted.
+The **Rubric** tab is that policy, and it's yours to own: every watcher shows its
+signal, *how* it is evaluated and *why* it sits in its tier — and you can toggle,
+retune, or **add your own**. The agent's only tool is `recall`, which searches its
+own Triolima memory, so the trace shows genuine tool hops.
 
 ```bash
 git clone https://github.com/thuyghe12/triolima.git
@@ -158,11 +163,11 @@ Replace `sk-ant-your-key-here` with your own key before running the `printf` lin
 this way avoids a dotenv gotcha — it reads the *first* `ANTHROPIC_API_KEY=` line,
 so overwriting is cleaner than appending to the template.
 
-Ask it to **`Investigate INC-7788 on payments-api.`** The agent calls real tools
-(`get_incident`, `get_metrics`, `search_runbooks`); the trace fills in real time —
-hard facts pinned by **code**, root cause gated by a **decision**, blast radius
-judged by a **narrow LLM**, and the irreversible mitigation **routed to you** —
-*keep going · pause · correct*.
+Then just talk. Say something like *“My email is me@acme.com, I prefer Karla, and
+please delete the old draft.”* and watch the trace: **Identifiers** pins the email
+(code), **Preferences** extracts a fact (decision), **Tone** is judged by a narrow
+**LLM** only because the turn looks loaded, and **Sensitive actions** catches
+“delete” and **pauses for you** (human) — *keep going · pause · correct*.
 
 - The key is read **server-side only** and never reaches the browser; use your own.
 - The default model is the cheapest (`claude-haiku-5-5`); set `ANTHROPIC_MODEL` to

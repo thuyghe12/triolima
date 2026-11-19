@@ -1,71 +1,120 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
     <title>Triolima</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Karla:ital,wght@0,300..800;1,300..800&family=Nanum+Pen+Script&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div class="app" id="app">
-      <!-- LEFT · chat -->
+      <!-- LEFT · conversation -->
       <section class="chat">
-        <header class="chat-head">
+        <header class="bar">
           <div class="brand">
             <span class="logo">△</span>
             <span class="name">Triolima</span>
-            <span class="tagline">incident assistant</span>
+            <span class="eyebrow tag">memory that remembers by meaning</span>
           </div>
           <div class="conn" id="conn"><i></i><span id="conn-text">connecting</span></div>
         </header>
 
-        <div class="stream" id="chat"></div>
+        <div class="stream" id="chat">
+          <div class="hello" id="hello">
+            <p>A real agent with governed memory.</p>
+            <span class="eyebrow">say anything — it keeps what matters, and the trace shows every hop</span>
+          </div>
+        </div>
 
-        <div class="chips" id="chips"></div>
         <form class="composer" id="composer">
-          <input id="input" autocomplete="off" placeholder="Investigate INC-7788 on payments-api." />
-          <button type="submit" aria-label="Send">↵</button>
+          <input id="input" autocomplete="off" placeholder="Type a message…" />
+          <button type="submit" id="send">Send</button>
         </form>
       </section>
 
       <!-- RIGHT · trace / rubric -->
       <aside class="side" id="side">
-        <header class="side-head">
+        <header class="side-bar">
           <div class="tabs" id="tabs">
             <button data-tab="trace" class="on">Trace</button>
             <button data-tab="rubric">Rubric</button>
           </div>
-          <button class="hide" id="hide" title="Collapse">⟩</button>
+          <button class="icon" id="hide" title="Collapse">›</button>
         </header>
 
         <div class="legend" id="legend"></div>
 
         <div class="panel" id="panel-trace">
-          <div class="trace" id="trace"></div>
-          <p class="empty" id="trace-empty">Every hop, classified live by the mechanism that handled it.</p>
+          <div class="spans" id="spans"></div>
+          <p class="empty" id="trace-empty"><span class="eyebrow">per-hop trace</span>Spans stream here as you chat — input, each watcher that acts, assemble, the model call, tools, output.</p>
         </div>
 
         <div class="panel" id="panel-rubric" hidden>
-          <p class="lead">The policy, and you own it. Each signal is routed to the cheapest mechanism that can be trusted with it.</p>
-          <div class="rubric" id="rubric"></div>
+          <div class="rubric-head">
+            <p class="lead">Your rubric. Each signal is routed to the cheapest mechanism that can be trusted with it. Edit, toggle, or add your own.</p>
+            <button class="add" id="add-rule">+ Add rule</button>
+          </div>
+          <div class="matrix" id="matrix"></div>
         </div>
 
         <footer class="stat" id="stat"></footer>
       </aside>
 
-      <button class="reopen" id="reopen" title="Show trace">Trace ⟨</button>
+      <button class="reopen" id="reopen" title="Show trace">Trace ‹</button>
     </div>
 
+    <!-- add-rule drawer -->
+    <div class="overlay" id="add-overlay" hidden>
+      <form class="sheet" id="add-form">
+        <div class="eyebrow">new watcher</div>
+        <label>Name<input name="name" required placeholder="e.g. Deadlines" /></label>
+        <label>Signal<input name="signal" placeholder="what it watches for" /></label>
+        <div class="row2">
+          <label>Mechanism
+            <select name="tier">
+              <option value="code">code · deterministic</option>
+              <option value="decision" selected>decision · scored gate</option>
+              <option value="llm">llm · subjective</option>
+              <option value="human">human · non-negotiable</option>
+            </select>
+          </label>
+          <label>Action
+            <select name="action">
+              <option value="extract" selected>extract</option>
+              <option value="pin">pin</option>
+              <option value="prune">prune</option>
+              <option value="judge">judge</option>
+              <option value="ask">ask</option>
+            </select>
+          </label>
+        </div>
+        <div class="row2">
+          <label>Threshold<input name="threshold" type="number" step="0.05" min="0" max="1" value="0.6" /></label>
+          <label>Owner<input name="owner" value="you" /></label>
+        </div>
+        <label>Why this tier<input name="why" placeholder="the risk / determinism rationale" /></label>
+        <div class="sheet-actions">
+          <button type="button" class="ghost" id="add-cancel">Cancel</button>
+          <button type="submit" class="solid">Add watcher</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- HITL card -->
     <div class="overlay" id="overlay" hidden>
       <div class="card">
-        <div class="card-tier"><i></i><span>human · non-negotiable</span></div>
+        <div class="eyebrow card-tier"><i></i><span>human · non-negotiable</span></div>
         <p class="card-says" id="card-says"></p>
         <p class="card-meta" id="card-meta"></p>
         <input id="card-correct" placeholder="what to do instead…" hidden />
         <div class="card-actions">
-          <button data-answer="keep_going" class="ok">Keep going</button>
+          <button data-answer="keep_going" class="solid">Keep going</button>
           <button data-answer="pause" class="warn">Pause</button>
-          <button data-answer="correct" class="alt">Correct</button>
+          <button data-answer="correct" class="ghost">Correct</button>
         </div>
       </div>
     </div>
