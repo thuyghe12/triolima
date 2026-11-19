@@ -46,6 +46,20 @@ whole history of a conversation's memory is one inspectable DAG.
   may be slow, and it runs after a task boundary, off that path.
 - **Cost is bounded by construction.** The disclosure budget caps the header and
   the retrieval set; the archive grows without touching per-turn cost.
+- **Capture is an adapter.** `observe()` is the one seam memory is fed through. An
+  app that owns its loop (the [demo](../demo), over the Anthropic Messages API)
+  instruments the four hops directly; an external runtime (Claude Code via OTel or
+  hooks) maps its trace onto the same `Hop` vocabulary. The three tiers never know
+  which. See [ADR 0003](adr/0003-capture-is-an-adapter.md).
+
+## The demo
+
+`demo/` is a working proof, not a mock: a real Claude agent works an SRE incident
+while the browser shows the chat, the audit tree coloured by actor, the three
+layers and a live token meter. `demo/agent/loop.ts` is the whole integration —
+`observe` at each hop, `assemble` to build the prompt, `consolidate` to extract and
+raise the human-in-the-loop card. The model is behind a one-method `ModelProvider`,
+so the loop is tested in CI with a scripted model and runs for real with a key.
 
 ## What proves it
 

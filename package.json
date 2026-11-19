@@ -21,14 +21,20 @@
     "lint": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
     "bench": "node --import tsx bench/run.ts",
+    "demo": "node --import tsx demo/server.ts",
     "build": "tsup src/index.ts --format esm,cjs --dts --clean",
     "clean": "rm -rf dist"
   },
   "keywords": ["ai", "agents", "memory", "context", "llm", "rag", "compaction"],
   "devDependencies": {
+    "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
+    "@types/ws": "^8.5.13",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
     "tsup": "^8.3.5",
     "tsx": "^4.21.0",
-    "typescript": "~5.8.2"
+    "typescript": "~5.8.2",
+    "ws": "^8.18.0"
   }
 }

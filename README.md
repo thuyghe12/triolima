@@ -126,6 +126,34 @@ if (cards.length) {                           // human in the loop, when it matt
 Wrapping an existing agent loop is a few lines. The whole audit trail is
 `memory.tree.log()` — every pin, fold, extraction and answer, by actor.
 
+## Try the live demo
+
+A **real Claude agent** working an SRE incident, with Triolima's memory visualised
+live — the chat, the audit tree coloured by actor, the three layers, and a token
+meter contrasting the bounded prompt against naive full history. Nothing is
+scripted.
+
+```bash
+cp .env.example .env     # add your ANTHROPIC_API_KEY
+npm install
+npm run demo             # → http://localhost:5173
+```
+
+Ask it to **`Investigate INC-7788 on payments-api.`** The agent calls real tools
+(`get_incident`, `get_metrics`, `search_runbooks`), Triolima pins the hard facts
+and extracts the root cause, and when the agent moves to apply an irreversible
+mitigation the loop **pauses for you** — *keep going · pause · correct*.
+
+- The key is read **server-side only** and never reaches the browser; use your own.
+- The default model is the cheapest (`claude-haiku-5-5`); set `ANTHROPIC_MODEL` to
+  change it. The loop is cost-capped per message.
+- Capture is wired by **owning the loop** — `observe()` at every hop (input,
+  tool_call, tool_result, output). Why not OpenTelemetry: [ADR 0003](docs/adr/0003-capture-is-an-adapter.md).
+
+The loop's plumbing (every hop observed, memory driving the prompt, the pause
+stopping a write) is covered by tests that run in CI with a scripted model, so the
+demo needs no key to stay green — only to run for real.
+
 ## Status
 
 Built in clean, verifiable steps. This is where it is:
@@ -136,7 +164,7 @@ Built in clean, verifiable steps. This is where it is:
 - [x] Disclosure — hot ranker, hybrid retrieval, deep archive
 - [x] Human-in-the-loop — threshold card, pause and resume
 - [x] Benchmark — naive window vs Triolima, with numbers
-- [ ] Demo — a working app: chat, the live git tree, the layers
+- [x] Demo — a real Claude agent: chat, the live audit tree, the layers, HITL
 
 ## Docs
 
