@@ -20,3 +20,4 @@ export {
   type RankedFact, type ScoredFact, type AssembledContext,
 } from './disclosure';
 export { createMemory, type Memory } from './memory';
+export { raiseCard, cardPrint, ANSWERS, type Card, type Answer } from './hitl';

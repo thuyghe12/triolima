@@ -30,6 +30,12 @@ export interface Rubric {
   threshold: number;
   /** Relative importance in the disclosure ranker. Defaults to 1. */
   weight?: number;
+  /**
+   * 0–1, optional and at or above `threshold`. When an extraction's confidence
+   * crosses this, the engine raises a human-in-the-loop card: the wrapping loop
+   * can pause and ask before continuing. Omit for a rubric that only remembers.
+   */
+  alert?: number;
 }
 
 /** The three-slider disclosure budget that keeps the prompt bounded. */
