@@ -20,6 +20,7 @@
   "scripts": {
     "lint": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
+    "bench": "node --import tsx bench/run.ts",
     "build": "tsup src/index.ts --format esm,cjs --dts --clean",
     "clean": "rm -rf dist"
   },
