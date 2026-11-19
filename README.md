@@ -97,9 +97,12 @@ memory already computes, a thin hook on top: so the system that decides what to
 
 ```bash
 npm install
-npm test          # the full suite, including the benchmark claim
-npm run bench     # print the comparison table above
+npm test
+npm run bench
 ```
+
+`npm test` runs the full suite (including the benchmark claim); `npm run bench`
+prints the comparison table above.
 
 ```ts
 import { createMemory } from "triolima";
@@ -134,10 +137,17 @@ meter contrasting the bounded prompt against naive full history. Nothing is
 scripted.
 
 ```bash
-cp .env.example .env     # add your ANTHROPIC_API_KEY
+git clone https://github.com/thuyghe12/triolima.git
+cd triolima
+printf 'ANTHROPIC_API_KEY=sk-ant-your-key-here\n' > .env
 npm install
-npm run demo             # → http://localhost:5173
+npm run demo
 ```
+
+Replace `sk-ant-your-key-here` with your own key before running the `printf` line
+(or edit `.env` afterwards), then open **http://localhost:5173**. Writing `.env`
+this way avoids a dotenv gotcha — it reads the *first* `ANTHROPIC_API_KEY=` line,
+so overwriting is cleaner than appending to the template.
 
 Ask it to **`Investigate INC-7788 on payments-api.`** The agent calls real tools
 (`get_incident`, `get_metrics`, `search_runbooks`), Triolima pins the hard facts
