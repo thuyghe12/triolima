@@ -3,8 +3,16 @@
  * tiers agree on shape and never drift apart.
  */
 
-/** Who performed a memory operation. Every commit on the audit tree has one. */
-export type Actor = 'agent' | 'pin' | 'rubric' | 'ranker' | 'human';
+/**
+ * Who performed a memory operation. Every commit on the audit tree has one.
+ * The actor names the worker; the event's `op` names what it did.
+ *   agent    — the conversation itself (a turn arrived)
+ *   fastpath — Tier 1: pin, fold, prune (synchronous, deterministic)
+ *   rubric   — Tier 2: score and extract (asynchronous)
+ *   ranker   — disclosure: what goes in the hot header this turn
+ *   human    — a person's answer to a card
+ */
+export type Actor = 'agent' | 'fastpath' | 'rubric' | 'ranker' | 'human';
 
 /** One message in a conversation — the unit Tier 1 reads. */
 export interface Turn {

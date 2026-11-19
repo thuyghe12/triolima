@@ -9,3 +9,7 @@ export const VERSION = '0.1.0';
 export type { Actor, Turn, Rubric, Budget, Config } from './types';
 export { estimateTokens } from './tokens';
 export { createTree, contentId, type Tree, type MemoryEvent } from './tree';
+export {
+  entropy, isLowSignal, findPins, isTaskBoundary, foldReceipt, runTier1,
+  SIGNAL_FLOOR, type PinHit, type Tier1Result,
+} from './tier1';
