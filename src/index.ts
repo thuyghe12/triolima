@@ -13,3 +13,5 @@ export {
   entropy, isLowSignal, findPins, isTaskBoundary, foldReceipt, runTier1,
   SIGNAL_FLOOR, type PinHit, type Tier1Result,
 } from './tier1';
+export { inMemory, factKey, type Store, type Fact, type NewFact } from './store';
+export { scoreRubric, extractFact, consolidate, type Consolidation } from './tier2';
